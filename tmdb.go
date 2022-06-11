@@ -48,3 +48,21 @@ func GetMovieWithIMDBID(imdbID string) (*tmdb.MovieDetails, error) {
 	}
 	return details, nil
 }
+
+func GetStreamingChannels(id int) ([]string, error) {
+	client, err := NewTMDBClient()
+	if err != nil {
+		return nil, err
+	}
+	watchP, err := client.GetMovieWatchProviders(id, nil)
+	if err != nil {
+		return nil, err
+	}
+	providers := []string{}
+	if val, ok := watchP.MovieWatchProvidersResults.Results["US"]; ok {
+		for _, item := range val.Flatrate {
+			providers = append(providers, item.ProviderName)
+		}
+	}
+	return providers, nil
+}

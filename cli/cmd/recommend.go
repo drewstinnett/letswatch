@@ -22,10 +22,14 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apex/log"
+	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/drewstinnett/letswatch"
 	"github.com/drewstinnett/letterrestd/letterboxd"
 	"github.com/spf13/cobra"
@@ -38,8 +42,14 @@ var recommendCmd = &cobra.Command{
 	Short: "Recommend a movie to watch!",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		start := time.Now()
 		// Set up scrape client for letterboxd
 		sc := letterboxd.NewScrapeClient(nil)
+		ctx := context.Background()
+
+		// What is our letterboxd user?
+		letterboxdUser, err := cmd.Flags().GetString("letterboxd-user")
+		cobra.CheckErr(err)
 
 		earliest, err := cmd.Flags().GetInt("earliest")
 		log.Debugf("earliest: %d", earliest)
@@ -50,72 +60,156 @@ var recommendCmd = &cobra.Command{
 
 		maxRuntime, err := cmd.Flags().GetDuration("max-runtime")
 		cobra.CheckErr(err)
-
-		// wantWatches, err := letswatch.ParseRadarrMoviesWithFile(wantWatchF)
-		wantWatches, err := sc.List.ListFilms(nil, &letterboxd.ListFilmsOpt{
-			User: "dave",
-			Slug: "official-top-250-narrative-feature-films",
-		})
+		minRuntime, err := cmd.Flags().GetDuration("min-runtime")
 		cobra.CheckErr(err)
+
+		useWatchlist, err := cmd.Flags().GetBool("watchlist")
+		cobra.CheckErr(err)
+
+		useTop250, err := cmd.Flags().GetBool("top250")
+		cobra.CheckErr(err)
+
+		includeWatched, err := cmd.Flags().GetBool("include-watched")
+		cobra.CheckErr(err)
+
+		includeNotStreaming, err := cmd.Flags().GetBool("include-not-streaming")
+		cobra.CheckErr(err)
+
+		// preWG := &sync.WaitGroup{}
+		// ogLock := &sync.Mutex{}
+
+		var isoFilms []*letterboxd.Film
+		isoBatchFilter := &letterboxd.FilmBatchOpts{}
+
+		// ogFilmList := []*letterboxd.Film{}
+		if useWatchlist {
+			log.Info("Adding Watchlist to ISO")
+			isoBatchFilter.WatchList = []string{letterboxdUser}
+		}
+
+		if useTop250 {
+			log.Info("Adding top 250 narrative films")
+			isoBatchFilter.Lists = []*letterboxd.ListID{
+				{
+					User: "dave",
+					Slug: "official-top-250-narrative-feature-films",
+				},
+			}
+		}
 
 		// Collect watched films first
-		// watchedIDs := []string{}
-		letterboxdUser, err := cmd.Flags().GetString("letterboxd-user")
-		cobra.CheckErr(err)
-
-		log.Info("Getting watched films")
 		watchedIDs := []string{}
-		watchedFilms, _, err := sc.User.ListWatched(nil, letterboxdUser)
-		cobra.CheckErr(err)
-		for _, watchedFilm := range watchedFilms {
-			watchedIDs = append(watchedIDs, watchedFilm.ExternalIDs.IMDB)
-		}
-		// watched := []*letswatch.Movie{}
-
-		var possibleRecs []letswatch.Movie
-		var recommendations []*letswatch.Movie
-
-		for _, wantWatchMovie := range wantWatches {
-			/*
-				if wantWatchMovie.ReleaseYear < earliest {
-					log.WithFields(log.Fields{
-						"film": wantWatchMovie.Title,
-					}).Debug("Released too early")
-					continue
+		if !includeWatched {
+			log.Info("Getting watched films")
+			wfilmC := make(chan *letterboxd.Film)
+			wdoneC := make(chan error)
+			go sc.User.StreamWatchedWithChan(nil, letterboxdUser, wfilmC, wdoneC)
+			loop := true
+			for loop {
+				select {
+				case film := <-wfilmC:
+					watchedIDs = append(watchedIDs, film.ExternalIDs.IMDB)
+				case err := <-wdoneC:
+					if err != nil {
+						log.WithError(err).Error("Failed to get watched films")
+						wdoneC <- err
+					} else {
+						log.Info("Finished")
+						loop = false
+					}
 				}
-			*/
-			var haveWatched bool
+			}
+		}
+		log.Info("Waiting for collections to complete")
+
+		isoC := make(chan *letterboxd.Film)
+		done := make(chan error)
+		var recCount int
+		go sc.Film.StreamBatchWithChan(ctx, isoBatchFilter, isoC, done)
+
+		loop := true
+		for loop {
+			select {
+			case film := <-isoC:
+				isoFilms = append(isoFilms, film)
+			case err := <-done:
+				if err != nil {
+					log.WithError(err).Error("Failed to get iso films")
+					done <- err
+				} else {
+					log.Info("Finished")
+					loop = false
+				}
+			}
+		}
+
+		// Now filter the movies down
+		for _, item := range isoFilms {
+			// Filter watched films if specified
+			var disqualified bool
 			for _, watchedMovie := range watchedIDs {
-				if wantWatchMovie.ExternalIDs.IMDB == watchedMovie {
+				if item.ExternalIDs.IMDB == watchedMovie {
 					log.WithFields(log.Fields{
-						"film": wantWatchMovie.Title,
+						"film": item.Title,
 					}).Debug("Already watched")
-					haveWatched = true
+					disqualified = true
+					// TODO: Should we break further up?
 					break
 				}
 			}
-			if !haveWatched {
-				possibleRecs = append(possibleRecs, letswatch.Movie{
-					Title:  wantWatchMovie.Title,
-					IMDBID: wantWatchMovie.ExternalIDs.IMDB,
-					// ReleaseYear: wantWatchMovie.ReleaseYear,
-				})
-			}
-		}
-
-		// Next pass, enhance movies with TMDB data
-		for _, possibleRec := range possibleRecs {
-			m, err := letswatch.GetMovieWithIMDBID(possibleRec.IMDBID)
-			cobra.CheckErr(err)
-
-			// Filter based on TMDB data here
-			if language != "" && m.OriginalLanguage != language {
-				log.WithFields(log.Fields{
-					"film":     m.Title,
-					"language": m.OriginalLanguage,
-				}).Debug("Wrong language")
+			if disqualified {
 				continue
 			}
+
+			// Populate with TMDB Data
+			var m *tmdb.MovieDetails
+			if item.ExternalIDs.IMDB != "" {
+				m, err = letswatch.GetMovieWithIMDBID(item.ExternalIDs.IMDB)
+				if err != nil {
+					log.WithError(err).WithFields(log.Fields{
+						"imdbid": item.ExternalIDs.IMDB,
+						"tmdbid": item.ExternalIDs.TMDB,
+						"title":  item.Title,
+					}).Warn("Error getting movie from TMDB")
+					continue
+				}
+			} else {
+				log.WithFields(log.Fields{
+					"imdbid": item.ExternalIDs.IMDB,
+					"tmdbid": item.ExternalIDs.TMDB,
+					"title":  item.Title,
+				}).Debug("Movie does not have an IMDB entry. Skipping...")
+			}
+
+			// Do some checking on the y ear
+			var releaseYear int
+			if m.ReleaseDate != "" {
+				releaseYearS := strings.Split(m.ReleaseDate, "-")[0]
+				releaseYear, err = strconv.Atoi(releaseYearS)
+				if err != nil {
+					log.WithError(err).WithFields(log.Fields{
+						"title": item.Title,
+					}).Warn("Error parsing release year")
+				} else {
+					if releaseYear < earliest {
+						log.WithFields(log.Fields{
+							"film": m.Title,
+						}).Debug("Released too early")
+						disqualified = true
+					}
+				}
+
+				// Filter based on language
+				if language != "" && m.OriginalLanguage != language {
+					log.WithFields(log.Fields{
+						"film":     m.Title,
+						"language": m.OriginalLanguage,
+					}).Debug("Wrong language")
+					disqualified = true
+					continue
+				}
+			}
+
 			rt := time.Duration(m.Runtime) * time.Minute
 			if maxRuntime != 0 && rt > maxRuntime {
 				log.WithFields(log.Fields{
@@ -123,34 +217,60 @@ var recommendCmd = &cobra.Command{
 					"runtime":  m.Runtime,
 					"max-time": maxRuntime,
 				}).Debug("Too long")
+				disqualified = true
+				continue
+			}
+			if minRuntime != 0 && rt < minRuntime {
+				log.WithFields(log.Fields{
+					"film":     m.Title,
+					"runtime":  m.Runtime,
+					"min-time": minRuntime,
+				}).Debug("Too short")
+				disqualified = true
 				continue
 			}
 
-			// Add to possibilities
-			recommendations = append(recommendations, &letswatch.Movie{
-				Title:       m.Title,
-				Language:    m.OriginalLanguage,
-				ReleaseYear: possibleRec.ReleaseYear,
-				IMDBLink:    fmt.Sprintf("https://www.imdb.com/title/%s", m.IMDbID),
-				RunTime:     time.Duration(m.Runtime) * time.Minute,
-			})
+			// Ok, looks good, lets find where it's streaming
+			streaming, err := letswatch.GetStreamingChannels(int(m.ID))
+			if err != nil {
+				log.WithError(err).WithFields(log.Fields{
+					"title": item.Title,
+				}).Warn("Error getting streaming channels")
+			}
+			if !includeNotStreaming && len(streaming) == 0 {
+				log.WithFields(log.Fields{
+					"film":      m.Title,
+					"streaming": streaming,
+				}).Debug("Not streaming anywhere, skipping")
+				disqualified = true
+				continue
+			}
 
+			if !disqualified {
+				recCount++
+				rec := &letswatch.Movie{
+					Title:       item.Title,
+					Language:    m.OriginalLanguage,
+					ReleaseYear: releaseYear,
+					IMDBLink:    fmt.Sprintf("https://www.imdb.com/title/%s", m.IMDbID),
+					RunTime:     time.Duration(m.Runtime) * time.Minute,
+					StreamingOn: streaming,
+				}
+				recL := []*letswatch.Movie{
+					rec,
+				}
+				d, err := yaml.Marshal(recL)
+				cobra.CheckErr(err)
+				fmt.Println(string(d))
+			}
 		}
 
-		data, err := yaml.Marshal(recommendations)
-		cobra.CheckErr(err)
-		fmt.Println(string(data))
-		/*
-			log.WithFields(log.Fields{
-				"film":     rec.Title,
-				"released": rec.ReleaseDate,
-				"language": rec.OriginalLanguage,
-			}).Info("Recommendations")
-		*/
+		end := time.Now()
 
 		log.WithFields(log.Fields{
-			"possible_recs": len(recommendations),
-		}).Info("Found Possible Recs")
+			"count":    recCount,
+			"duration": end.Sub(start),
+		}).Info("Completed")
 	},
 }
 
@@ -161,12 +281,19 @@ func init() {
 
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
-	recommendCmd.PersistentFlags().String("want-watch", "./testdata/top250.json", "JSON List of Movies to watch")
 	// recommendCmd.PersistentFlags().String("watched", "./testdata/watched.json", "JSON List of Movies you have already watched")
 	recommendCmd.PersistentFlags().String("letterboxd-user", "mondodrew", "Letterboxd User")
 	recommendCmd.PersistentFlags().Int("earliest", 1900, "Earliest release year of a film to recommend")
 	recommendCmd.PersistentFlags().String("language", "", "Original language of the movie")
 	recommendCmd.PersistentFlags().Duration("max-runtime", 0, "Maximum runtime of a movie to recommend")
+	recommendCmd.PersistentFlags().Duration("min-runtime", 15*time.Minute, "Minimum runtime of a movie to recommend")
+	recommendCmd.PersistentFlags().Bool("include-watched", false, "Include films you have watched films the list")
+	recommendCmd.PersistentFlags().Bool("include-not-streaming", false, "Include films that aren't streaming anywhere")
+	recommendCmd.PersistentFlags().BoolP("watchlist", "w", false, "Include the users watchlist as part of the recommendations")
+	recommendCmd.PersistentFlags().Bool("top250", false, "Include the top 250 narrative films as part of the recommendations")
+
+	// Replace this please
+	recommendCmd.PersistentFlags().String("want-watch", "./testdata/top250.json", "JSON List of Movies to watch")
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
