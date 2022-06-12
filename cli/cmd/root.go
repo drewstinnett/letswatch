@@ -24,6 +24,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
@@ -36,7 +37,14 @@ import (
 var (
 	cfgFile string
 	Verbose bool
+	start   = time.Now()
+	stats   *runStats
 )
+
+type runStats struct {
+	TotalItems int           `json:"total_items"`
+	Duration   time.Duration `json:"duration"`
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -50,6 +58,15 @@ var rootCmd = &cobra.Command{
 		if Verbose {
 			log.SetLevel(log.DebugLevel)
 		}
+		stats = &runStats{}
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		end := time.Now()
+		stats.Duration = end.Sub(start)
+		log.WithFields(log.Fields{
+			"total_items": stats.TotalItems,
+			"duration":    stats.Duration,
+		}).Info("Run stats")
 	},
 }
 
@@ -66,12 +83,14 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cli.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.letswatch.yaml)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().String("letterboxd-username", "", "My Letterboxd Username")
+	rootCmd.MarkPersistentFlagRequired("letterboxd-username")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -84,9 +103,8 @@ func initConfig() {
 		home, err := homedir.Dir()
 		cobra.CheckErr(err)
 
-		// Search config in home directory with name ".cli" (without extension).
 		viper.AddConfigPath(home)
-		viper.SetConfigName(".cli")
+		viper.SetConfigName(".letswatch")
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match

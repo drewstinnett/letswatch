@@ -24,14 +24,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/apex/log"
 	tmdb "github.com/cyruzin/golang-tmdb"
+	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
-	"github.com/drewstinnett/letterrestd/letterboxd"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -42,9 +40,8 @@ var recommendCmd = &cobra.Command{
 	Short: "Recommend a movie to watch!",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		start := time.Now()
 		// Set up scrape client for letterboxd
-		sc := letterboxd.NewScrapeClient(nil)
+		sc := letterboxd.NewClient(nil)
 		ctx := context.Background()
 
 		// What is our letterboxd user?
@@ -103,12 +100,18 @@ var recommendCmd = &cobra.Command{
 			log.Info("Getting watched films")
 			wfilmC := make(chan *letterboxd.Film)
 			wdoneC := make(chan error)
-			go sc.User.StreamWatchedWithChan(nil, letterboxdUser, wfilmC, wdoneC)
+			go sc.User.StreamWatched(nil, letterboxdUser, wfilmC, wdoneC)
 			loop := true
 			for loop {
 				select {
 				case film := <-wfilmC:
-					watchedIDs = append(watchedIDs, film.ExternalIDs.IMDB)
+					if film.ExternalIDs != nil {
+						watchedIDs = append(watchedIDs, film.ExternalIDs.IMDB)
+					} else {
+						log.WithFields(log.Fields{
+							"title": film.Title,
+						}).Debugf("No external IDs, skipping")
+					}
 				case err := <-wdoneC:
 					if err != nil {
 						log.WithError(err).Error("Failed to get watched films")
@@ -124,11 +127,9 @@ var recommendCmd = &cobra.Command{
 
 		isoC := make(chan *letterboxd.Film)
 		done := make(chan error)
-		var recCount int
-		go sc.Film.StreamBatchWithChan(ctx, isoBatchFilter, isoC, done)
+		go sc.Film.StreamBatch(ctx, isoBatchFilter, isoC, done)
 
-		loop := true
-		for loop {
+		for loop := true; loop; {
 			select {
 			case film := <-isoC:
 				isoFilms = append(isoFilms, film)
@@ -160,6 +161,13 @@ var recommendCmd = &cobra.Command{
 			if disqualified {
 				continue
 			}
+			// Do some checking on the y ear
+			if (earliest > 0) && (item.Year < earliest) {
+				log.WithFields(log.Fields{
+					"film": item.Title,
+				}).Debug("Released too early")
+				continue
+			}
 
 			// Populate with TMDB Data
 			var m *tmdb.MovieDetails
@@ -181,33 +189,13 @@ var recommendCmd = &cobra.Command{
 				}).Debug("Movie does not have an IMDB entry. Skipping...")
 			}
 
-			// Do some checking on the y ear
-			var releaseYear int
-			if m.ReleaseDate != "" {
-				releaseYearS := strings.Split(m.ReleaseDate, "-")[0]
-				releaseYear, err = strconv.Atoi(releaseYearS)
-				if err != nil {
-					log.WithError(err).WithFields(log.Fields{
-						"title": item.Title,
-					}).Warn("Error parsing release year")
-				} else {
-					if releaseYear < earliest {
-						log.WithFields(log.Fields{
-							"film": m.Title,
-						}).Debug("Released too early")
-						disqualified = true
-					}
-				}
-
-				// Filter based on language
-				if language != "" && m.OriginalLanguage != language {
-					log.WithFields(log.Fields{
-						"film":     m.Title,
-						"language": m.OriginalLanguage,
-					}).Debug("Wrong language")
-					disqualified = true
-					continue
-				}
+			// Filter based on language
+			if language != "" && m.OriginalLanguage != language {
+				log.WithFields(log.Fields{
+					"film":     m.Title,
+					"language": m.OriginalLanguage,
+				}).Debug("Wrong language")
+				continue
 			}
 
 			rt := time.Duration(m.Runtime) * time.Minute
@@ -217,7 +205,6 @@ var recommendCmd = &cobra.Command{
 					"runtime":  m.Runtime,
 					"max-time": maxRuntime,
 				}).Debug("Too long")
-				disqualified = true
 				continue
 			}
 			if minRuntime != 0 && rt < minRuntime {
@@ -226,7 +213,6 @@ var recommendCmd = &cobra.Command{
 					"runtime":  m.Runtime,
 					"min-time": minRuntime,
 				}).Debug("Too short")
-				disqualified = true
 				continue
 			}
 
@@ -242,35 +228,25 @@ var recommendCmd = &cobra.Command{
 					"film":      m.Title,
 					"streaming": streaming,
 				}).Debug("Not streaming anywhere, skipping")
-				disqualified = true
 				continue
 			}
 
-			if !disqualified {
-				recCount++
-				rec := &letswatch.Movie{
-					Title:       item.Title,
-					Language:    m.OriginalLanguage,
-					ReleaseYear: releaseYear,
-					IMDBLink:    fmt.Sprintf("https://www.imdb.com/title/%s", m.IMDbID),
-					RunTime:     time.Duration(m.Runtime) * time.Minute,
-					StreamingOn: streaming,
-				}
-				recL := []*letswatch.Movie{
-					rec,
-				}
-				d, err := yaml.Marshal(recL)
-				cobra.CheckErr(err)
-				fmt.Println(string(d))
+			stats.TotalItems++
+			rec := &letswatch.Movie{
+				Title:       item.Title,
+				Language:    m.OriginalLanguage,
+				ReleaseYear: item.Year,
+				IMDBLink:    fmt.Sprintf("https://www.imdb.com/title/%s", m.IMDbID),
+				RunTime:     time.Duration(m.Runtime) * time.Minute,
+				StreamingOn: streaming,
 			}
+			recL := []*letswatch.Movie{
+				rec,
+			}
+			d, err := yaml.Marshal(recL)
+			cobra.CheckErr(err)
+			fmt.Print(string(d))
 		}
-
-		end := time.Now()
-
-		log.WithFields(log.Fields{
-			"count":    recCount,
-			"duration": end.Sub(start),
-		}).Info("Completed")
 	},
 }
 
@@ -282,7 +258,6 @@ func init() {
 	// Cobra supports Persistent Flags which will work for this command
 	// and all subcommands, e.g.:
 	// recommendCmd.PersistentFlags().String("watched", "./testdata/watched.json", "JSON List of Movies you have already watched")
-	recommendCmd.PersistentFlags().String("letterboxd-user", "mondodrew", "Letterboxd User")
 	recommendCmd.PersistentFlags().Int("earliest", 1900, "Earliest release year of a film to recommend")
 	recommendCmd.PersistentFlags().String("language", "", "Original language of the movie")
 	recommendCmd.PersistentFlags().Duration("max-runtime", 0, "Maximum runtime of a movie to recommend")
