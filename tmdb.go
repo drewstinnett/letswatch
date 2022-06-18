@@ -13,6 +13,14 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+type TMDBService interface {
+	GetWithIMDBID(context.Context, string) (*tmdb.MovieDetails, error)
+}
+
+type TMDBServiceOp struct {
+	client *Client
+}
+
 type TMDBMovie struct {
 	Title       string `json:"title,omitempty"`
 	ReleaseYear int    `json:"release_year,omitempty"`
@@ -50,6 +58,63 @@ func NewTMDBClientWithCache() (*TMDBClientWithCache, error) {
 		LocalCache: cache.NewTinyLFU(1000, time.Minute),
 	})
 	return t, nil
+}
+
+func (t *TMDBServiceOp) GetWithIMDBID(ctx context.Context, imdbID string) (*tmdb.MovieDetails, error) {
+	key := fmt.Sprintf("/letswatch/tmdb/by-imdb-id/%s", imdbID)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var movie *tmdb.MovieDetails
+
+	var inCache bool
+
+	if t.client.Cache != nil {
+		log.WithFields(log.Fields{
+			"key": key,
+			"ctx": ctx,
+		}).Debug("Using cache for lookup")
+		if err := t.client.Cache.Get(ctx, key, &movie); err == nil {
+			log.WithField("key", key).Debug("Found page in cache")
+			inCache = true
+		} else {
+			log.WithError(err).WithField("key", key).Debug("TMDB Entry NOT in cache")
+		}
+
+	}
+	if !inCache {
+		options := map[string]string{}
+		options["external_source"] = "imdb_id"
+		search, err := t.client.TMDBClient.GetFindByID(imdbID, options)
+		if err != nil {
+			return nil, err
+		}
+		if len(search.MovieResults) == 0 {
+			return nil, errors.New("ErrNoMovieFound")
+		} else if len(search.MovieResults) > 1 {
+			log.WithFields(log.Fields{
+				"imdb_id": imdbID,
+				"count":   len(search.MovieResults),
+			}).Warn("Found more than one movie, using the first one")
+		}
+		thing := search.MovieResults[0]
+
+		movie, err = t.client.TMDBClient.GetMovieDetails(int(thing.ID), nil)
+		if err != nil {
+			return nil, err
+		}
+		if t.client.Cache != nil {
+			if err := t.client.Cache.Set(&cache.Item{
+				Ctx:   ctx,
+				Key:   key,
+				Value: movie,
+				TTL:   time.Hour * 24,
+			}); err != nil {
+				log.WithError(err).Warn("Error Writing Cache")
+			}
+		}
+	}
+	return movie, nil
 }
 
 func GetMovieWithIMDBID(imdbID string) (*tmdb.MovieDetails, error) {

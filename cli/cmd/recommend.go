@@ -62,7 +62,7 @@ var recommendCmd = &cobra.Command{
 			log.Info("Getting watched films")
 			wfilmC := make(chan *letterboxd.Film)
 			wdoneC := make(chan error)
-			go sc.User.StreamWatched(nil, meInfo.LetterboxdUsername, wfilmC, wdoneC)
+			go lwc.LetterboxdClient.User.StreamWatched(nil, meInfo.LetterboxdUsername, wfilmC, wdoneC)
 
 			for loop := true; loop; {
 				select {
@@ -88,7 +88,7 @@ var recommendCmd = &cobra.Command{
 
 		isoC := make(chan *letterboxd.Film)
 		done := make(chan error)
-		go sc.Film.StreamBatch(ctx, isoBatchFilter, isoC, done)
+		go lwc.LetterboxdClient.Film.StreamBatch(ctx, isoBatchFilter, isoC, done)
 
 		for loop := true; loop; {
 			select {

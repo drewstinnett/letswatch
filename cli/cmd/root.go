@@ -27,7 +27,7 @@ import (
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
-	"github.com/drewstinnett/go-letterboxd"
+	"github.com/drewstinnett/letswatch"
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -37,10 +37,12 @@ import (
 var (
 	cfgFile string
 	Verbose bool
+	err     error
 	start   = time.Now()
 	stats   *runStats
-	sc      *letterboxd.Client
-	ctx     context.Context
+	// sc      *letterboxd.Client
+	ctx context.Context
+	lwc *letswatch.Client
 )
 
 type runStats struct {
@@ -61,10 +63,14 @@ var rootCmd = &cobra.Command{
 			log.SetLevel(log.DebugLevel)
 		}
 		stats = &runStats{}
-		config := &letterboxd.ClientConfig{
-			UseCache: true,
-		}
-		sc = letterboxd.NewClient(config)
+		/*
+			config := &letterboxd.ClientConfig{
+				UseCache: true,
+			}
+			sc = letterboxd.NewClient(config)
+		*/
+		lwc, err = letswatch.NewClient(nil)
+		cobra.CheckErr(err)
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		end := time.Now()
