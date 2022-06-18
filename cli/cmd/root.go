@@ -22,12 +22,12 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"fmt"
-	"os"
+	"context"
 	"time"
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
+	"github.com/drewstinnett/go-letterboxd"
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -39,6 +39,8 @@ var (
 	Verbose bool
 	start   = time.Now()
 	stats   *runStats
+	sc      *letterboxd.Client
+	ctx     context.Context
 )
 
 type runStats struct {
@@ -59,6 +61,10 @@ var rootCmd = &cobra.Command{
 			log.SetLevel(log.DebugLevel)
 		}
 		stats = &runStats{}
+		config := &letterboxd.ClientConfig{
+			UseCache: true,
+		}
+		sc = letterboxd.NewClient(config)
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		end := time.Now()
@@ -90,7 +96,9 @@ func init() {
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Verbose logging")
 	rootCmd.PersistentFlags().String("letterboxd-username", "", "My Letterboxd Username")
-	rootCmd.MarkPersistentFlagRequired("letterboxd-username")
+	viper.BindPFlag("letterboxd-username", rootCmd.PersistentFlags().Lookup("letterboxd-username"))
+	rootCmd.PersistentFlags().StringArray("subscribed-to", []string{}, "Streaming services that you are subscribed to")
+	viper.BindPFlag("subscribed-to", rootCmd.PersistentFlags().Lookup("subscribed-to"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -111,6 +119,34 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+		log.Debugf("Using config file: %v", viper.ConfigFileUsed())
 	}
+}
+
+// Remove dups from slice.
+func removeDups(elements []string) (nodups []string) {
+	encountered := make(map[string]bool)
+	for _, element := range elements {
+		if !encountered[element] {
+			nodups = append(nodups, element)
+			encountered[element] = true
+		}
+	}
+	return
+}
+
+func intersection(s1, s2 []string) (inter []string) {
+	hash := make(map[string]bool)
+	for _, e := range s1 {
+		hash[e] = true
+	}
+	for _, e := range s2 {
+		// If elements present in the hashmap then append intersection list.
+		if hash[e] {
+			inter = append(inter, e)
+		}
+	}
+	// Remove dups from slice.
+	inter = removeDups(inter)
+	return
 }
