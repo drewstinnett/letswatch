@@ -3,12 +3,17 @@ package letswatch
 import (
 	"testing"
 
+	"github.com/drewstinnett/go-letterboxd"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewClient(t *testing.T) {
-	config := &ClientConfig{}
-	c, err := NewClient(config)
+	c, err := NewClient(&ClientConfig{
+		UseCache: false,
+		LetterboxdConfig: &letterboxd.ClientConfig{
+			DisableCache: true,
+		},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, c)
 }

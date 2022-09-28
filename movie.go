@@ -11,11 +11,13 @@ import (
 
 type Movie struct {
 	Title         string        `yaml:"title,omitempty"`
+	Directors     []string      `yaml:"directors,omitempty"`
 	ReleaseYear   int           `yaml:"release_year,omitempty"`
 	IMDBID        string        `yaml:"imdb_id,omitempty"`
 	IMDBLink      string        `yaml:"imdb_link,omitempty"`
 	TMDBID        string        `yaml:"tmdb_id,omitempty"`
 	Language      string        `yaml:"language,omitempty"`
+	OnPlex        bool          `yaml:"on_plex,omitempty"`
 	RunTime       time.Duration `yaml:"runtime,omitempty"`
 	StreamingOn   []string      `yaml:"streaming_on,omitempty"`
 	StreamingOnMy []string      `yaml:"streaming_on_my,omitempty"`
@@ -34,6 +36,7 @@ type MovieFilterOpts struct {
 	OnlyMyStreaming     bool          `yaml:"only_my_streaming,omitempty"`
 	OnlyNotMyStreaming  bool          `yaml:"only_not_my_streaming,omitempty"`
 	Genres              []string      `yaml:"genre,omitempty"`
+	Directors           []string      `yaml:"directors,omitempty"`
 }
 
 func (m *MovieFilterOpts) ValidateWithPerson(p *PersonInfo) error {
@@ -52,44 +55,40 @@ func (m *MovieFilterOpts) ValidateWithPerson(p *PersonInfo) error {
 
 func NewMovieFilterOptsWithCmd(cmd *cobra.Command) (*MovieFilterOpts, error) {
 	opts := &MovieFilterOpts{}
-	var err error
-	opts.Earliest, err = cmd.Flags().GetInt("earliest")
+	earliest, err := cmd.Flags().GetInt("earliest")
 	if err != nil {
-		return nil, err
+		opts.Earliest = 1900
+	} else {
+		opts.Earliest = earliest
 	}
 
-	opts.Language, err = cmd.Flags().GetString("language")
-	if err != nil {
-		return nil, err
-	}
-	opts.MaxRuntime, err = cmd.Flags().GetDuration("max-runtime")
-	if err != nil {
-		return nil, err
-	}
-	opts.MinRuntime, err = cmd.Flags().GetDuration("min-runtime")
-	if err != nil {
-		return nil, err
+	language, err := cmd.Flags().GetString("language")
+	if err == nil {
+		opts.Language = language
 	}
 
-	opts.Genres, err = cmd.Flags().GetStringArray("genre")
-	if err != nil {
-		return nil, err
+	maxRuntime, err := cmd.Flags().GetDuration("max-runtime")
+	if err == nil {
+		opts.MaxRuntime = maxRuntime
+	} else {
+		opts.MaxRuntime = time.Duration(24 * time.Hour)
 	}
 
-	opts.OnlyMyStreaming, err = cmd.Flags().GetBool("only-my-streaming")
+	minRuntime, err := cmd.Flags().GetDuration("min-runtime")
 	if err != nil {
-		return nil, err
+		opts.MinRuntime = time.Duration(0)
+	} else {
+		opts.MinRuntime = minRuntime
 	}
 
-	opts.OnlyNotMyStreaming, err = cmd.Flags().GetBool("only-not-my-streaming")
-	if err != nil {
-		return nil, err
-	}
+	opts.Genres, _ = cmd.Flags().GetStringArray("genre")
+	opts.Directors, _ = cmd.Flags().GetStringArray("director")
 
-	opts.IncludeWatched, err = cmd.Flags().GetBool("include-watched")
-	if err != nil {
-		return nil, err
-	}
+	opts.OnlyMyStreaming, _ = cmd.Flags().GetBool("only-my-streaming")
+
+	opts.OnlyNotMyStreaming, _ = cmd.Flags().GetBool("only-not-my-streaming")
+
+	opts.IncludeWatched, _ = cmd.Flags().GetBool("include-watched")
 
 	return opts, nil
 }
@@ -102,18 +101,16 @@ type MovieCollectOpts struct {
 func NewMovieCollectOptsWithCmd(cmd *cobra.Command) (*MovieCollectOpts, error) {
 	opts := &MovieCollectOpts{}
 	var err error
-	opts.Watchlist, err = cmd.Flags().GetBool("watchlist")
-	if err != nil {
-		return nil, err
-	}
+	opts.Watchlist, _ = cmd.Flags().GetBool("watchlist")
 
 	listArg, err := cmd.Flags().GetStringArray("list")
 	if err != nil {
-		return nil, err
-	}
-	opts.Lists, err = parseListArgs(listArg)
-	if err != nil {
-		return nil, err
+		opts.Lists = []*letterboxd.ListID{}
+	} else {
+		opts.Lists, err = parseListArgs(listArg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return opts, nil
 }

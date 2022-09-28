@@ -133,7 +133,7 @@ var recommendCmd = &cobra.Command{
 			// Populate with TMDB Data
 			var m *tmdb.MovieDetails
 			if item.ExternalIDs.IMDB != "" {
-				m, err = letswatch.GetMovieWithIMDBID(item.ExternalIDs.IMDB)
+				m, err = lwc.TMDB.GetWithIMDBID(ctx, item.ExternalIDs.IMDB)
 				if err != nil {
 					log.WithError(err).WithFields(log.Fields{
 						"imdbid": item.ExternalIDs.IMDB,
@@ -157,6 +157,25 @@ var recommendCmd = &cobra.Command{
 					"title":  item.Title,
 				}).Warn("No TMDB data for film")
 				continue
+			}
+
+			// Do director stuff
+			var directors []string
+			for _, i := range m.MovieCreditsAppend.Credits.Crew {
+				if i.Job == "Director" {
+					directors = append(directors, i.Name)
+				}
+			}
+			if len(movieFilterOpts.Directors) > 0 {
+				directorIntersection := intersection(movieFilterOpts.Directors, directors)
+				if len(directorIntersection) == 0 {
+					log.WithFields(log.Fields{
+						"film":       m.Title,
+						"directors":  directors,
+						"want-genre": movieFilterOpts.Directors,
+					}).Debug("Film does not have any of the directors we want")
+					continue
+				}
 			}
 
 			// Filter based on language
@@ -196,17 +215,27 @@ var recommendCmd = &cobra.Command{
 
 			// Just my streaming?
 			streamingOnMy := intersection(meInfo.SubscribedTo, streaming)
+			var isAvailOnPlex bool
 			if movieFilterOpts.OnlyMyStreaming {
-				if len(streamingOnMy) == 0 {
+				// Collect movies we have in Plex
+				if lwc.Plex != nil {
+					isAvailOnPlex, err = lwc.Plex.IsAvailable(ctx, item.Title, item.Year)
+					cobra.CheckErr(err)
+				}
+				if !isAvailOnPlex && len(streamingOnMy) == 0 {
 					log.WithFields(log.Fields{
 						"film":         m.Title,
 						"streaming":    streaming,
 						"my-streaming": meInfo.SubscribedTo,
-					}).Debug("Film not on any of my streaming subscriptions")
+					}).Debug("Film not on any of my streaming subscriptions or plex")
 					continue
 				}
 			} else if movieFilterOpts.OnlyNotMyStreaming {
-				if len(streamingOnMy) > 0 {
+				if lwc.Plex != nil {
+					isAvailOnPlex, err = lwc.Plex.IsAvailable(ctx, item.Title, item.Year)
+					cobra.CheckErr(err)
+				}
+				if len(streamingOnMy) > 0 || isAvailOnPlex {
 					log.WithFields(log.Fields{
 						"film":         m.Title,
 						"streaming":    streaming,
@@ -236,6 +265,7 @@ var recommendCmd = &cobra.Command{
 			stats.TotalItems++
 			rec := &letswatch.Movie{
 				Title:         item.Title,
+				Directors:     directors,
 				Language:      m.OriginalLanguage,
 				Budget:        float64(m.Budget) / float64(1000000),
 				ReleaseYear:   item.Year,
@@ -244,6 +274,7 @@ var recommendCmd = &cobra.Command{
 				StreamingOn:   streaming,
 				StreamingOnMy: streamingOnMy,
 				Genres:        genres,
+				OnPlex:        isAvailOnPlex,
 			}
 			recL := []*letswatch.Movie{
 				rec,
@@ -267,9 +298,10 @@ func init() {
 	recommendCmd.PersistentFlags().Duration("min-runtime", 15*time.Minute, "Minimum runtime of a movie to recommend")
 	recommendCmd.PersistentFlags().Bool("include-watched", false, "Include films you have watched films the list")
 	// recommendCmd.PersistentFlags().Bool("include-not-streaming", true, "Include films that aren't streaming anywhere")
-	recommendCmd.PersistentFlags().Bool("only-my-streaming", false, "Only include films that are streaming on your streaming services")
+	recommendCmd.PersistentFlags().Bool("only-my-streaming", false, "Only include films that are streaming on your streaming services. This includes your Plex server if configured")
 	recommendCmd.PersistentFlags().Bool("only-not-my-streaming", false, "Only include films that are NOT streaming on your streaming services")
 	recommendCmd.PersistentFlags().StringArray("genre", []string{}, "Only include films that have this genre")
+	recommendCmd.PersistentFlags().StringArray("director", []string{}, "Only include films that have this director")
 
 	// Request Flags
 	recommendCmd.PersistentFlags().BoolP("watchlist", "w", false, "Include the users watchlist as part of the recommendations")
