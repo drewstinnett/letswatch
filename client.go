@@ -3,38 +3,59 @@ package letswatch
 import (
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/apex/log"
 	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/drewstinnett/go-letterboxd"
 	"github.com/go-redis/cache/v8"
-	"github.com/go-redis/redis/v8"
+	"github.com/jrudio/go-plex-client"
 )
 
 type Client struct {
 	TMDBClient       *tmdb.Client
 	LetterboxdClient *letterboxd.Client
+	PlexClient       *plex.Plex
 	HTTPClient       *http.Client
 	Cache            *cache.Cache
 	UserAgent        string
 	TMDB             TMDBService
+	Plex             PlexService
 }
 
 type ClientConfig struct {
-	HTTPClient *http.Client
-	UseCache   bool
-	Cache      *cache.Cache
-	TMDBKey    string
+	HTTPClient       *http.Client
+	UseCache         bool
+	Cache            *cache.Cache
+	TMDBKey          string
+	PlexURL          string
+	PlexToken        string
+	LetterboxdConfig *letterboxd.ClientConfig
 }
 
 func NewClient(config *ClientConfig) (*Client, error) {
 	var c *Client
 
 	if config == nil {
-		config = &ClientConfig{
-			HTTPClient: http.DefaultClient,
-		}
+		config = &ClientConfig{}
+		/*if config.RedisHost == "" {
+			log.Fatal("Cache is not disabled and no RedisHost or Cache specified")
+		}*/
+		/*
+			rdb := redis.NewClient(&redis.Options{
+				Addr:     "192.168.86.3:6379",
+				Password: "",
+				DB:       0,
+			})
+
+			config = &ClientConfig{
+				HTTPClient: http.DefaultClient,
+				UseCache:   true,
+				Cache: cache.New(&cache.Options{
+					Redis:      rdb,
+					LocalCache: cache.NewTinyLFU(1000, time.Minute),
+				}),
+			}
+		*/
 	}
 
 	if config.HTTPClient == nil {
@@ -45,23 +66,9 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		HTTPClient: config.HTTPClient,
 		UserAgent:  userAgent,
 	}
-	if config.UseCache {
-		log.Debug("Configuring local cache inside client")
-		if config.Cache != nil {
-			c.Cache = config.Cache
-		} else {
-			ring := redis.NewRing(&redis.RingOptions{
-				Addrs: map[string]string{
-					"localhost": ":6379",
-				},
-			})
-
-			c.Cache = cache.New(&cache.Options{
-				Redis:      ring,
-				LocalCache: cache.NewTinyLFU(1000, time.Minute),
-			})
-
-		}
+	// Enable cache if configured
+	if config.Cache != nil {
+		c.Cache = config.Cache
 	}
 
 	var tmdbKey string
@@ -79,10 +86,18 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		}
 		c.TMDBClient = tmdbC
 	}
+
+	if config.PlexURL != "" && config.PlexToken != "" {
+		log.Debug("Configuring Plex client")
+		plexC, err := plex.New(config.PlexURL, config.PlexToken)
+		if err != nil {
+			return nil, err
+		}
+		c.PlexClient = plexC
+		c.Plex = &PlexServiceOp{client: c}
+	}
 	// c.TMDBKey = config.TMDBKey
-	c.LetterboxdClient = letterboxd.NewClient(&letterboxd.ClientConfig{
-		UseCache: true,
-	})
+	c.LetterboxdClient = letterboxd.NewClient(config.LetterboxdConfig)
 
 	c.TMDB = &TMDBServiceOp{client: c}
 	return c, nil

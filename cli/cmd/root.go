@@ -23,11 +23,15 @@ package cmd
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
+	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
+	"github.com/go-redis/cache/v8"
+	"github.com/go-redis/redis/v8"
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -63,13 +67,29 @@ var rootCmd = &cobra.Command{
 			log.SetLevel(log.DebugLevel)
 		}
 		stats = &runStats{}
-		/*
-			config := &letterboxd.ClientConfig{
-				UseCache: true,
-			}
-			sc = letterboxd.NewClient(config)
-		*/
-		lwc, err = letswatch.NewClient(nil)
+		config := &letswatch.ClientConfig{}
+		if os.Getenv("PLEX_URL") != "" {
+			config.PlexURL = os.Getenv("PLEX_URL")
+		}
+		if os.Getenv("PLEX_TOKEN") != "" {
+			config.PlexToken = os.Getenv("PLEX_TOKEN")
+		}
+
+		// Enable caching
+		rdb := redis.NewClient(&redis.Options{
+			Addr:     "192.168.86.3:6379",
+			Password: "",
+			DB:       0,
+		})
+		config.Cache = cache.New(&cache.Options{
+			Redis:      rdb,
+			LocalCache: cache.NewTinyLFU(1000, time.Minute),
+		})
+
+		lbc := &letterboxd.ClientConfig{}
+		lbc.RedisHost = viper.GetString("redis-host")
+		config.LetterboxdConfig = lbc
+		lwc, err = letswatch.NewClient(config)
 		cobra.CheckErr(err)
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -105,6 +125,8 @@ func init() {
 	viper.BindPFlag("letterboxd-username", rootCmd.PersistentFlags().Lookup("letterboxd-username"))
 	rootCmd.PersistentFlags().StringArray("subscribed-to", []string{}, "Streaming services that you are subscribed to")
 	viper.BindPFlag("subscribed-to", rootCmd.PersistentFlags().Lookup("subscribed-to"))
+	rootCmd.PersistentFlags().String("redis-host", "localhost:6379", "URL for Redis cluster")
+	viper.BindPFlag("redis-host", rootCmd.PersistentFlags().Lookup("redis-host"))
 }
 
 // initConfig reads in config file and ENV variables if set.
