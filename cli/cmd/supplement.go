@@ -31,7 +31,6 @@ import (
 	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
 	"github.com/spf13/cobra"
-	"golift.io/starr"
 	"golift.io/starr/radarr"
 )
 
@@ -42,7 +41,6 @@ var supplementCmd = &cobra.Command{
 	Long:  `Get a list of moves we can't find streaming, and send them in to another API for requests.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var err error
-		fmt.Println("supplement called")
 		listA, err := cmd.Flags().GetStringArray("list")
 		cobra.CheckErr(err)
 		lists, err := parseListArgs(listA)
@@ -51,20 +49,14 @@ var supplementCmd = &cobra.Command{
 		dryRun, err := cmd.Flags().GetBool("dry-run")
 		cobra.CheckErr(err)
 
-		// Init radarr client
-		if os.Getenv("RADARR_URL") == "" || os.Getenv("RADARR_KEY") == "" || os.Getenv("RADARR_QUALITY") == "" || os.Getenv("RADARR_PATH") == "" {
-			log.Fatal("Must set RADARR_URL, RADARR_KEY, RADARR_QUALITY and RADARR_PATH")
-		}
-		sc := starr.New(os.Getenv("RADARR_KEY"), os.Getenv("RADARR_URL"), 0)
-		// Lets make a lidarr server with the default starr Config.
-		radC := radarr.New(sc)
+		moviesToAdd := []radarr.AddMovieInput{}
 
 		// Quality profiles
-		profiles, err := radC.GetQualityProfiles()
+		profiles, err := lwc.RadarrClient.GetQualityProfiles()
 		cobra.CheckErr(err)
 		var qpID int64
 		for _, p := range profiles {
-			if p.Name == os.Getenv("RADARR_QUALITY") {
+			if p.Name == lwc.Config.RadarrQuality {
 				qpID = p.ID
 			}
 		}
@@ -75,7 +67,7 @@ var supplementCmd = &cobra.Command{
 		// Do a special tag with al lthese
 		tag := "letswatch-supplement"
 		var tagID int
-		tags, err := radC.GetTags()
+		tags, err := lwc.RadarrClient.GetTags()
 		cobra.CheckErr(err)
 		for _, t := range tags {
 			if t.Label == tag {
@@ -83,7 +75,7 @@ var supplementCmd = &cobra.Command{
 			}
 		}
 		if tagID == 0 {
-			tagID, err = radC.AddTag(tag)
+			tagID, err = lwc.RadarrClient.AddTag(tag)
 			cobra.CheckErr(err)
 		}
 
@@ -211,7 +203,7 @@ var supplementCmd = &cobra.Command{
 			}
 
 			// Do we have this movie in radarr already?
-			results, err := radC.GetMovie(m.ID)
+			results, err := lwc.RadarrClient.GetMovie(m.ID)
 			cobra.CheckErr(err)
 			if len(results) > 0 {
 				log.WithFields(log.Fields{
@@ -222,50 +214,36 @@ var supplementCmd = &cobra.Command{
 
 			stats.TotalItems++
 
-			log.WithFields(log.Fields{
-				"title": item.Title,
-			}).Info("Adding film to radarr")
 			tmdbID, err := strconv.ParseInt(item.ExternalIDs.TMDB, 10, 64)
 			cobra.CheckErr(err)
-			mi := &radarr.AddMovieInput{
+			mi := radarr.AddMovieInput{
 				Title:            item.Title,
 				Year:             item.Year,
 				TmdbID:           tmdbID,
 				QualityProfileID: qpID,
-				RootFolderPath:   os.Getenv("RADARR_PATH"),
-				Monitored:        true,
-				Tags:             []int{tagID},
+				// RootFolderPath:   os.Getenv("RADARR_PATH"),
+				RootFolderPath: lwc.Config.RadarrPath,
+				Monitored:      true,
+				Tags:           []int{tagID},
 				AddOptions: &radarr.AddMovieOptions{
 					SearchForMovie: true,
 				},
 			}
-			if !dryRun {
-				_, err = radC.AddMovie(mi)
+			moviesToAdd = append(moviesToAdd, mi)
+		}
+		if !dryRun {
+			for _, mi := range moviesToAdd {
+				fmt.Fprintf(os.Stderr, "%+v\n", mi)
+				log.WithField("title", mi.Title).Info("Adding to radarr")
+				_, err = lwc.RadarrClient.AddMovie(&mi)
 				cobra.CheckErr(err)
-			} else {
+			}
+		} else {
+			for _, mi := range moviesToAdd {
 				log.WithFields(log.Fields{
 					"movie": mi.Title,
 				}).Info("Dry run, not adding to radarr")
 			}
-			/*
-				rec := &letswatch.Movie{
-					Title:         item.Title,
-					Language:      m.OriginalLanguage,
-					Budget:        float64(m.Budget) / float64(1000000),
-					ReleaseYear:   item.Year,
-					IMDBLink:      fmt.Sprintf("https://www.imdb.com/title/%s", m.IMDbID),
-					RunTime:       time.Duration(m.Runtime) * time.Minute,
-					StreamingOn:   streaming,
-					StreamingOnMy: streamingOnMy,
-					OnPlex:        isAvailOnPlex,
-				}
-				recL := []*letswatch.Movie{
-					rec,
-				}
-				d, err := yaml.Marshal(recL)
-				cobra.CheckErr(err)
-				fmt.Print(string(d))
-			*/
 		}
 	},
 }

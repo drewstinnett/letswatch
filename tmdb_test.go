@@ -25,8 +25,11 @@ func TestGetMovieWithIMDBID(t *testing.T) {
 	httpmock.RegisterResponder("GET", "https://api.themoviedb.org/3/movie/290098",
 		httpmock.NewStringResponder(200, string(movie_details)))
 	os.Setenv("TMDB_KEY", "fake-key")
-	c, err := NewClient(&ClientConfig{
-		UseCache: false,
+	c, err := NewClient(ClientConfig{
+		UseCache:  false,
+		TMDBKey:   "foo",
+		PlexURL:   "https://plex.example.com",
+		PlexToken: "foo",
 		LetterboxdConfig: &letterboxd.ClientConfig{
 			DisableCache: true,
 		},

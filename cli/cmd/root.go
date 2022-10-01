@@ -23,15 +23,11 @@ package cmd
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
-	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
-	"github.com/go-redis/cache/v8"
-	"github.com/go-redis/redis/v8"
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -58,38 +54,16 @@ type runStats struct {
 var rootCmd = &cobra.Command{
 	Use:   "letswatch",
 	Short: "Pick something to watch!",
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		log.SetHandler(cli.Default)
 		if Verbose {
 			log.SetLevel(log.DebugLevel)
 		}
 		stats = &runStats{}
-		config := &letswatch.ClientConfig{}
-		if os.Getenv("PLEX_URL") != "" {
-			config.PlexURL = os.Getenv("PLEX_URL")
-		}
-		if os.Getenv("PLEX_TOKEN") != "" {
-			config.PlexToken = os.Getenv("PLEX_TOKEN")
-		}
-
-		// Enable caching
-		rdb := redis.NewClient(&redis.Options{
-			Addr:     "192.168.86.3:6379",
-			Password: "",
-			DB:       0,
-		})
-		config.Cache = cache.New(&cache.Options{
-			Redis:      rdb,
-			LocalCache: cache.NewTinyLFU(1000, time.Minute),
-		})
-
-		lbc := &letterboxd.ClientConfig{}
-		lbc.RedisHost = viper.GetString("redis-host")
-		config.LetterboxdConfig = lbc
-		lwc, err = letswatch.NewClient(config)
+		// config := &letswatch.ClientConfig{}
+		// config.LetterboxdConfig = lbc
+		// lwc, err = letswatch.NewClient(*config)
+		lwc, err = letswatch.NewClientWithViper(*viper.GetViper())
 		cobra.CheckErr(err)
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

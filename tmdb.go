@@ -11,6 +11,7 @@ import (
 	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/go-redis/cache/v8"
 	"github.com/go-redis/redis/v8"
+	"github.com/spf13/viper"
 )
 
 type TMDBService interface {
@@ -27,7 +28,8 @@ type TMDBMovie struct {
 }
 
 func NewTMDBClient() (*tmdb.Client, error) {
-	key := os.Getenv("TMDB_KEY")
+	// key := os.Getenv("TMDB_KEY")
+	key := viper.GetString("tmdb_key")
 	if key == "" {
 		return nil, errors.New("ErrNoTMDBKey")
 	}
