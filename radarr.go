@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"strconv"
 
+	"github.com/drewstinnett/go-letterboxd"
 	"github.com/rs/zerolog/log"
 	"golift.io/starr/radarr"
 )
@@ -16,6 +18,7 @@ type RadarrService interface {
 	MustAddTag(string) int
 	MoviesWithTMDBID(int64) ([]*radarr.Movie, error)
 	AddMovie(*radarr.AddMovieInput) (*radarr.AddMovieOutput, error)
+	MovieInputWithLetterboxdFilm(*letterboxd.Film) (*radarr.AddMovieInput, error)
 }
 
 type RadarrServiceOp struct {
@@ -68,6 +71,32 @@ func (svc *RadarrServiceOp) MustAddTag(t string) int {
 		panic(err)
 	}
 	return i
+}
+
+func (svc *RadarrServiceOp) MovieInputWithLetterboxdFilm(item *letterboxd.Film) (*radarr.AddMovieInput, error) {
+	// Figure out tmdb id in a usable format
+	tmdbID, err := strconv.ParseInt(item.ExternalIDs.TMDB, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := svc.QualityProfileWithName(svc.client.Config.RadarrQuality)
+	if err != nil {
+		return nil, err
+	}
+	tagID := svc.MustAddTag("letswatch-supplement")
+	mi := &radarr.AddMovieInput{
+		Title:            item.Title,
+		Year:             item.Year,
+		TmdbID:           tmdbID,
+		QualityProfileID: profile.ID,
+		RootFolderPath:   svc.client.Config.RadarrPath,
+		Monitored:        true,
+		Tags:             []int{tagID},
+		AddOptions: &radarr.AddMovieOptions{
+			SearchForMovie: true,
+		},
+	}
+	return mi, nil
 }
 
 func ParseRadarrMovies(data []byte) ([]RadarrMovie, error) {

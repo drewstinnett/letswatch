@@ -22,8 +22,6 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"strconv"
-
 	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
 	"github.com/rs/zerolog/log"
@@ -43,21 +41,10 @@ var supplementCmd = &cobra.Command{
 	Short: "Supplement your streaming content with missing films",
 	Long:  `Get a list of moves we can't find streaming, and send them in to another API for requests.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		lists := mustParseListArgs(listsA)
-
-		moviesToAdd := []radarr.AddMovieInput{}
-
-		// Quality profiles
-		profile, err := lwc.Radarr.QualityProfileWithName(lwc.Config.RadarrQuality)
-		cobra.CheckErr(err)
-
-		// Do a special tag with al lthese
-		// var tagID int
-		tagID := lwc.Radarr.MustAddTag("letswatch-supplement")
-
 		isoBatchFilter := &letterboxd.FilmBatchOpts{
-			List: lists,
+			List: mustParseListArgs(listsA),
 		}
+		// Pull in films
 		isoC := make(chan *letterboxd.Film)
 		done := make(chan error)
 		go lwc.LetterboxdClient.Film.StreamBatch(ctx, isoBatchFilter, isoC, done)
@@ -73,26 +60,17 @@ var supplementCmd = &cobra.Command{
 			RemoveMyRadarr:    true,
 		})
 		cobra.CheckErr(err)
-
 		stats.TotalItems = len(prunedFilms)
+
+		moviesToAdd := []radarr.AddMovieInput{}
+
 		for _, item := range prunedFilms {
 
-			tmdbID, err := strconv.ParseInt(item.ExternalIDs.TMDB, 10, 64)
+			mi, err := lwc.Radarr.MovieInputWithLetterboxdFilm(item)
 			cobra.CheckErr(err)
-			mi := radarr.AddMovieInput{
-				Title:            item.Title,
-				Year:             item.Year,
-				TmdbID:           tmdbID,
-				QualityProfileID: profile.ID,
-				RootFolderPath:   lwc.Config.RadarrPath,
-				Monitored:        true,
-				Tags:             []int{tagID},
-				AddOptions: &radarr.AddMovieOptions{
-					SearchForMovie: true,
-				},
-			}
-			moviesToAdd = append(moviesToAdd, mi)
+			moviesToAdd = append(moviesToAdd, *mi)
 		}
+
 		if !dryRun {
 			for _, mi := range moviesToAdd {
 				log.Info().Str("title", mi.Title).Int("year", mi.Year).Msg("Adding to radarr")

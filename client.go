@@ -252,3 +252,7 @@ func NewClientWithEnv(config ClientConfig) (*Client, error) {
 
 	return NewClient(config)
 }
+
+type SupplementOpt struct {
+	// Lists []*letterboxd.ListID
+}
