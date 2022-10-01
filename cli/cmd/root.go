@@ -23,11 +23,13 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
-	"github.com/apex/log"
-	"github.com/apex/log/handlers/cli"
 	"github.com/drewstinnett/letswatch"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -55,10 +57,6 @@ var rootCmd = &cobra.Command{
 	Use:   "letswatch",
 	Short: "Pick something to watch!",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		log.SetHandler(cli.Default)
-		if Verbose {
-			log.SetLevel(log.DebugLevel)
-		}
 		stats = &runStats{}
 		// config := &letswatch.ClientConfig{}
 		// config.LetterboxdConfig = lbc
@@ -69,10 +67,7 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		end := time.Now()
 		stats.Duration = end.Sub(start)
-		log.WithFields(log.Fields{
-			"total_items": stats.TotalItems,
-			"duration":    stats.Duration,
-		}).Info("Run stats")
+		log.Info().Int("total_items", stats.TotalItems).Str("duration", fmt.Sprint(stats.Duration)).Msg("Run stats")
 	},
 }
 
@@ -118,10 +113,15 @@ func initConfig() {
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if Verbose {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		log.Debugf("Using config file: %v", viper.ConfigFileUsed())
+		log.Debug().Str("config-file", viper.ConfigFileUsed()).Msg("Using config file")
 	}
 }
 

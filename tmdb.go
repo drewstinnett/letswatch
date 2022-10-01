@@ -4,22 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/apex/log"
 	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/go-redis/cache/v8"
-	"github.com/go-redis/redis/v8"
-	"github.com/spf13/viper"
 )
 
 type TMDBService interface {
 	GetWithIMDBID(context.Context, string) (*tmdb.MovieDetails, error)
+	GetStreamingChannels(id int) ([]string, error)
 }
 
 type TMDBServiceOp struct {
-	client *Client
+	client     *Client
+	tmdbClient *tmdb.Client
 }
 
 type TMDBMovie struct {
@@ -27,9 +26,7 @@ type TMDBMovie struct {
 	ReleaseYear int    `json:"release_year,omitempty"`
 }
 
-func NewTMDBClient() (*tmdb.Client, error) {
-	// key := os.Getenv("TMDB_KEY")
-	key := viper.GetString("tmdb_key")
+func NewTMDBClient(key string) (*tmdb.Client, error) {
 	if key == "" {
 		return nil, errors.New("ErrNoTMDBKey")
 	}
@@ -41,8 +38,9 @@ type TMDBClientWithCache struct {
 	Cache  *cache.Cache
 }
 
-func NewTMDBClientWithCache() (*TMDBClientWithCache, error) {
-	tc, err := NewTMDBClient()
+/*
+func (svc *TMDBServiceOp) NewTMDBClientWithCache() (*TMDBClientWithCache, error) {
+	tc, err := NewTMDBClient(svc.client.Config.TMDBKey)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +62,7 @@ func NewTMDBClientWithCache() (*TMDBClientWithCache, error) {
 	})
 	return t, nil
 }
+*/
 
 func (t *TMDBServiceOp) GetWithIMDBID(ctx context.Context, imdbID string) (*tmdb.MovieDetails, error) {
 	key := fmt.Sprintf("/letswatch/tmdb/by-imdb-id/%s", imdbID)
@@ -90,7 +89,7 @@ func (t *TMDBServiceOp) GetWithIMDBID(ctx context.Context, imdbID string) (*tmdb
 	if !inCache {
 		options := map[string]string{}
 		options["external_source"] = "imdb_id"
-		search, err := t.client.TMDBClient.GetFindByID(imdbID, options)
+		search, err := t.tmdbClient.GetFindByID(imdbID, options)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +105,7 @@ func (t *TMDBServiceOp) GetWithIMDBID(ctx context.Context, imdbID string) (*tmdb
 
 		options = map[string]string{}
 		options["append_to_response"] = "credits"
-		movie, err = t.client.TMDBClient.GetMovieDetails(int(thing.ID), options)
+		movie, err = t.tmdbClient.GetMovieDetails(int(thing.ID), options)
 		if err != nil {
 			return nil, err
 		}
@@ -124,12 +123,8 @@ func (t *TMDBServiceOp) GetWithIMDBID(ctx context.Context, imdbID string) (*tmdb
 	return movie, nil
 }
 
-func GetStreamingChannels(id int) ([]string, error) {
-	client, err := NewTMDBClient()
-	if err != nil {
-		return nil, err
-	}
-	watchP, err := client.GetMovieWatchProviders(id, nil)
+func (svc *TMDBServiceOp) GetStreamingChannels(id int) ([]string, error) {
+	watchP, err := svc.tmdbClient.GetMovieWatchProviders(id, nil)
 	if err != nil {
 		return nil, err
 	}

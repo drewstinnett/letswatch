@@ -24,9 +24,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/apex/log"
 	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -41,12 +41,12 @@ var uiCmd = &cobra.Command{
 		isoBatchFilter := &letterboxd.FilmBatchOpts{}
 
 		if len(movieCollectOpts.Lists) > 0 {
-			log.Info("Getting lists")
+			log.Info().Msg("Getting lists")
 			isoBatchFilter.List = movieCollectOpts.Lists
 		}
 
 		if movieCollectOpts.Watchlist {
-			log.Info("Adding Watchlist to ISO")
+			log.Info().Msg("Adding Watchlist to ISO")
 			isoBatchFilter.WatchList = []string{meInfo.LetterboxdUsername}
 		}
 
@@ -60,10 +60,10 @@ var uiCmd = &cobra.Command{
 				isoFilms = append(isoFilms, film)
 			case err := <-done:
 				if err != nil {
-					log.WithError(err).Error("Failed to get iso films")
+					log.Error().Err(err).Msg("Failed to get iso films")
 					done <- err
 				} else {
-					log.Debug("Finished streaming ISO films")
+					log.Debug().Msg("Finished streaming ISO films")
 					loop = false
 				}
 			}
@@ -72,7 +72,7 @@ var uiCmd = &cobra.Command{
 		// Collect watched films first
 		watchedIDs := []string{}
 		if !movieFilterOpts.IncludeWatched {
-			log.Info("Getting watched films")
+			log.Info().Msg("Getting watched films")
 			wfilmC := make(chan *letterboxd.Film)
 			wdoneC := make(chan error)
 			go lwc.LetterboxdClient.User.StreamWatched(nil, meInfo.LetterboxdUsername, wfilmC, wdoneC)
@@ -83,16 +83,14 @@ var uiCmd = &cobra.Command{
 					if film.ExternalIDs != nil {
 						watchedIDs = append(watchedIDs, film.ExternalIDs.IMDB)
 					} else {
-						log.WithFields(log.Fields{
-							"title": film.Title,
-						}).Debugf("No external IDs, skipping")
+						log.Debug().Str("title", film.Title).Msg("No external IDs, skipping")
 					}
 				case err := <-wdoneC:
 					if err != nil {
-						log.WithError(err).Error("Failed to get watched films")
+						log.Error().Err(err).Msg("Failed to get watched films")
 						wdoneC <- err
 					} else {
-						log.Debug("Finished getting watched films")
+						log.Debug().Msg("Finished getting watched films")
 						loop = false
 					}
 				}
@@ -114,7 +112,7 @@ var uiCmd = &cobra.Command{
 			}
 			m, err := lwc.TMDB.GetWithIMDBID(ctx, film.ExternalIDs.IMDB)
 			if err != nil {
-				log.WithError(err).Error("Failed to get movie")
+				log.Error().Err(err).Msg("Failed to get movie")
 				continue
 			}
 			lwFilms = append(lwFilms, &letswatch.Movie{
