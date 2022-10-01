@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/drewstinnett/go-letterboxd"
+	"github.com/gobwas/glob"
+	"github.com/rs/zerolog/log"
 )
 
 // Given a slice of strings, return a slice of ListIDs
@@ -22,4 +24,34 @@ func parseListArgs(args []string) ([]*letterboxd.ListID, error) {
 		ret = append(ret, lid)
 	}
 	return ret, nil
+}
+
+func mustParseListArgs(args []string) []*letterboxd.ListID {
+	lists, err := parseListArgs(args)
+	if err != nil {
+		panic(err)
+	}
+	return lists
+}
+
+// MatchesGlobOf returns true if an item matches any of the given globs
+func MatchesGlobOf(item string, globs []string) bool {
+	for _, matchGlob := range globs {
+		g := glob.MustCompile(matchGlob)
+		got := g.Match(item)
+		if got {
+			return true
+		}
+	}
+	log.Debug().Str("title", item).Msg("Skipping because it matches no globs")
+	return false
+}
+
+func ContainsString(ss []string, s string) bool {
+	for _, item := range ss {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

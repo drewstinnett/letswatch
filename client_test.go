@@ -42,6 +42,7 @@ func TestNewClientWithViper(t *testing.T) {
 	v.Set("tmdb_key", "foo")
 	v.Set("plex_url", "https://plex.example.com")
 	v.Set("plex_token", "token")
+	v.Set("redis-host", "http://localhost:8888")
 	got, err := NewClientWithViper(*v)
 	require.NoError(t, err)
 	require.NotNil(t, got)

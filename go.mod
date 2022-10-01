@@ -8,9 +8,10 @@ require (
 	github.com/charmbracelet/bubbletea v0.22.0
 	github.com/charmbracelet/lipgloss v0.5.0
 	github.com/cyruzin/golang-tmdb v1.4.4
-	github.com/drewstinnett/go-letterboxd v0.1.12
+	github.com/drewstinnett/go-letterboxd v0.1.18
 	github.com/go-redis/cache/v8 v8.4.3
 	github.com/go-redis/redis/v8 v8.11.3
+	github.com/gobwas/glob v0.2.3
 	github.com/jarcoal/httpmock v1.1.0
 	github.com/jrudio/go-plex-client v0.0.0-20220428052413-e5b4386beb17
 	github.com/mitchellh/go-homedir v1.1.0
@@ -30,7 +31,6 @@ require (
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	github.com/fatih/color v1.13.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/gorilla/websocket v1.4.0 // indirect
@@ -40,7 +40,6 @@ require (
 	github.com/klauspost/compress v1.13.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
-	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect

@@ -25,10 +25,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/apex/log"
 	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/drewstinnett/go-letterboxd"
 	"github.com/drewstinnett/letswatch"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -47,19 +47,19 @@ var recommendCmd = &cobra.Command{
 		isoBatchFilter := &letterboxd.FilmBatchOpts{}
 
 		if len(movieCollectOpts.Lists) > 0 {
-			log.Info("Getting lists")
+			log.Info().Msg("Getting lists")
 			isoBatchFilter.List = movieCollectOpts.Lists
 		}
 
 		if movieCollectOpts.Watchlist {
-			log.Info("Adding Watchlist to ISO")
+			log.Info().Msg("Adding Watchlist to ISO")
 			isoBatchFilter.WatchList = []string{meInfo.LetterboxdUsername}
 		}
 
 		// Collect watched films first
 		watchedIDs := []string{}
 		if !movieFilterOpts.IncludeWatched {
-			log.Info("Getting watched films")
+			log.Info().Msg("Getting watched films")
 			wfilmC := make(chan *letterboxd.Film)
 			wdoneC := make(chan error)
 			go lwc.LetterboxdClient.User.StreamWatched(nil, meInfo.LetterboxdUsername, wfilmC, wdoneC)
@@ -70,16 +70,14 @@ var recommendCmd = &cobra.Command{
 					if film.ExternalIDs != nil {
 						watchedIDs = append(watchedIDs, film.ExternalIDs.IMDB)
 					} else {
-						log.WithFields(log.Fields{
-							"title": film.Title,
-						}).Debugf("No external IDs, skipping")
+						log.Debug().Str("title", film.Title).Msg("No external IDs, skipping")
 					}
 				case err := <-wdoneC:
 					if err != nil {
-						log.WithError(err).Error("Failed to get watched films")
+						log.Error().Err(err).Msg("Failed to get watched films")
 						wdoneC <- err
 					} else {
-						log.Debug("Finished getting watched films")
+						log.Debug().Msg("Finished getting watched films")
 						loop = false
 					}
 				}
@@ -96,10 +94,10 @@ var recommendCmd = &cobra.Command{
 				isoFilms = append(isoFilms, film)
 			case err := <-done:
 				if err != nil {
-					log.WithError(err).Error("Failed to get iso films")
+					log.Error().Err(err).Msg("Failed to get iso films")
 					done <- err
 				} else {
-					log.Debug("Finished streaming ISO films")
+					log.Debug().Msg("Finished streaming ISO films")
 					loop = false
 				}
 			}
@@ -111,9 +109,7 @@ var recommendCmd = &cobra.Command{
 			var disqualified bool
 			for _, watchedMovie := range watchedIDs {
 				if item.ExternalIDs.IMDB == watchedMovie {
-					log.WithFields(log.Fields{
-						"film": item.Title,
-					}).Debug("Already watched")
+					log.Debug().Str("film", item.Title).Msg("Already watched")
 					disqualified = true
 					// TODO: Should we break further up?
 					break
@@ -124,9 +120,7 @@ var recommendCmd = &cobra.Command{
 			}
 			// Do some checking on the y ear
 			if (movieFilterOpts.Earliest > 0) && (item.Year < movieFilterOpts.Earliest) {
-				log.WithFields(log.Fields{
-					"film": item.Title,
-				}).Debug("Released too early")
+				log.Debug().Str("film", item.Title).Msg("Released too early")
 				continue
 			}
 
@@ -135,27 +129,15 @@ var recommendCmd = &cobra.Command{
 			if item.ExternalIDs.IMDB != "" {
 				m, err = lwc.TMDB.GetWithIMDBID(ctx, item.ExternalIDs.IMDB)
 				if err != nil {
-					log.WithError(err).WithFields(log.Fields{
-						"imdbid": item.ExternalIDs.IMDB,
-						"tmdbid": item.ExternalIDs.TMDB,
-						"title":  item.Title,
-					}).Warn("Error getting movie from TMDB")
+					log.Warn().Err(err).Str("imdbid", item.ExternalIDs.IMDB).Str("tmdbid", item.ExternalIDs.TMDB).Str("title", item.Title).Msg("Error getting movie from TMDB")
 					continue
 				}
 			} else {
-				log.WithFields(log.Fields{
-					"imdbid": item.ExternalIDs.IMDB,
-					"tmdbid": item.ExternalIDs.TMDB,
-					"title":  item.Title,
-				}).Debug("Movie does not have an IMDB entry. Skipping...")
+				log.Debug().Str("imdbid", item.ExternalIDs.IMDB).Str("tmdbid", item.ExternalIDs.TMDB).Str("title", item.Title).Msg("Movie does not have an IMDB entry. Skipping...")
 			}
 
 			if m == nil {
-				log.WithFields(log.Fields{
-					"imdbid": item.ExternalIDs.IMDB,
-					"tmdbid": item.ExternalIDs.TMDB,
-					"title":  item.Title,
-				}).Warn("No TMDB data for film")
+				log.Warn().Err(err).Str("imdbid", item.ExternalIDs.IMDB).Str("tmdbid", item.ExternalIDs.TMDB).Str("title", item.Title).Msg("No TMDB data for film")
 				continue
 			}
 
@@ -169,48 +151,33 @@ var recommendCmd = &cobra.Command{
 			if len(movieFilterOpts.Directors) > 0 {
 				directorIntersection := intersection(movieFilterOpts.Directors, directors)
 				if len(directorIntersection) == 0 {
-					log.WithFields(log.Fields{
-						"film":       m.Title,
-						"directors":  directors,
-						"want-genre": movieFilterOpts.Directors,
-					}).Debug("Film does not have any of the directors we want")
+					log.Debug().Str("film", m.Title).Strs("directors", directors).Strs("want-genre", movieFilterOpts.Directors).Msg("Film does not have any of the directors we want")
 					continue
 				}
 			}
 
 			// Filter based on language
 			if movieFilterOpts.Language != "" && m.OriginalLanguage != movieFilterOpts.Language {
-				log.WithFields(log.Fields{
-					"film":     m.Title,
-					"language": m.OriginalLanguage,
-				}).Debug("Wrong language")
+				log.Debug().Str("film", m.Title).Str("language", m.OriginalLanguage).Msg("Wrong language")
 				continue
 			}
 
 			rt := time.Duration(m.Runtime) * time.Minute
 			if movieFilterOpts.MaxRuntime != 0 && rt > movieFilterOpts.MaxRuntime {
-				log.WithFields(log.Fields{
-					"film":     m.Title,
-					"runtime":  m.Runtime,
-					"max-time": movieFilterOpts.MaxRuntime,
-				}).Debug("Too long")
+				log.Debug().Str("film", m.Title).Int("runtime", m.Runtime).Str("max-time", fmt.Sprint(movieFilterOpts.MaxRuntime)).Msg("Too long")
 				continue
 			}
 			if movieFilterOpts.MinRuntime != 0 && rt < movieFilterOpts.MinRuntime {
-				log.WithFields(log.Fields{
-					"film":     m.Title,
-					"runtime":  m.Runtime,
-					"min-time": movieFilterOpts.MinRuntime,
-				}).Debug("Too short")
+				log.Debug().Str("film", m.Title).Int("runtime", m.Runtime).Str("min-time", fmt.Sprint(movieFilterOpts.MinRuntime)).Msg("Too short")
 				continue
 			}
 
 			// Ok, looks good, lets find where it's streaming
-			streaming, err := letswatch.GetStreamingChannels(int(m.ID))
+			// streaming, err := letswatch.GetStreamingChannels(int(m.ID))
+			streaming, err := lwc.TMDB.GetStreamingChannels(int(m.ID))
+			// streaming, err := lwc.TMDB
 			if err != nil {
-				log.WithError(err).WithFields(log.Fields{
-					"title": item.Title,
-				}).Warn("Error getting streaming channels")
+				log.Warn().Err(err).Str("title", item.Title).Msg("Error getting streaming channels")
 			}
 
 			// Just my streaming?
@@ -223,11 +190,7 @@ var recommendCmd = &cobra.Command{
 					cobra.CheckErr(err)
 				}
 				if !isAvailOnPlex && len(streamingOnMy) == 0 {
-					log.WithFields(log.Fields{
-						"film":         m.Title,
-						"streaming":    streaming,
-						"my-streaming": meInfo.SubscribedTo,
-					}).Debug("Film not on any of my streaming subscriptions or plex")
+					log.Debug().Str("film", m.Title).Strs("streaming", streaming).Strs("my-streaming", meInfo.SubscribedTo).Msg("Film not on any of my streaming subscriptions or plex")
 					continue
 				}
 			} else if movieFilterOpts.OnlyNotMyStreaming {
@@ -236,11 +199,7 @@ var recommendCmd = &cobra.Command{
 					cobra.CheckErr(err)
 				}
 				if len(streamingOnMy) > 0 || isAvailOnPlex {
-					log.WithFields(log.Fields{
-						"film":         m.Title,
-						"streaming":    streaming,
-						"my-streaming": meInfo.SubscribedTo,
-					}).Debug("Film is on one of my streaming subscriptions")
+					log.Debug().Str("film", m.Title).Strs("streaming", streaming).Strs("my-streaming", meInfo.SubscribedTo).Msg("Film is on one of my streaming subscriptions")
 					continue
 				}
 			}
@@ -253,11 +212,7 @@ var recommendCmd = &cobra.Command{
 			if len(movieFilterOpts.Genres) > 0 {
 				genreIntersection := intersection(movieFilterOpts.Genres, genres)
 				if len(genreIntersection) == 0 {
-					log.WithFields(log.Fields{
-						"film":       m.Title,
-						"genres":     genres,
-						"want-genre": movieFilterOpts.Genres,
-					}).Debug("Film does not have any of the genres we want")
+					log.Debug().Str("film", m.Title).Strs("genres", genres).Strs("want-genres", movieFilterOpts.Genres).Msg("Film does not have any of the genres we want")
 					continue
 				}
 			}
